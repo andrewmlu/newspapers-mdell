@@ -1,6 +1,7 @@
 import os
 import re
 import json
+import time
 from datetime import datetime
 
 FILE_PATH = "/mnt/data01/pipeline_backup/pipeline_egress/"
@@ -16,28 +17,64 @@ class ManifestCollection:
         """
         with open(filename, "r") as f:
             newspapers = f.read().splitlines()
-        self.manifests = [Manifest(name, newspapers) for name in manifest_names]
-
+        self.manifests = []
+        start = time.time()
+        for i, name in enumerate(manifest_names):
+            print(time.time() - start)
+            # if i > 46 and i < 53:
+            print(name)
+            self.manifests.append(Manifest(name, newspapers))
     @classmethod
     def from_directory(cls, dir_path, filename):
         """
         Class method to create a ManifestCollection object based on all manifests found in a directory
         """
-        manifest_names = [name for name in os.listdir(dir_path) if os.path.isdir(os.path.join(dir_path, name))]
+        manifest_names = sorted([name for name in os.listdir(dir_path) if os.path.isdir(os.path.join(dir_path, name))])
+        print(manifest_names)
         return cls(manifest_names, filename)
-
     def get_all_metadata(self):
         """
         Get all metadata from all manifests in the collection
         """
         all_metadata = {}
-        for manifest in self.manifests:
+        for i, manifest in enumerate(self.manifests):
             for newspaper, metadata in manifest.metadata.items():
                 if newspaper not in all_metadata:
                     all_metadata[newspaper] = metadata
                 else:
                     all_metadata[newspaper].extend(metadata)
         return all_metadata
+    def get_entry_counts_by_newspaper_and_year(self):
+        """
+        Get the number of entries for each newspaper for each year
+        """
+        entry_counts = {}
+        for newspaper, entries in self.get_all_metadata().items():
+            entry_counts[newspaper] = {}
+            for entry in entries:
+                year = entry['Date'].split('-')[0]
+                if year not in entry_counts[newspaper]:
+                    entry_counts[newspaper][year] = 1
+                else:
+                    entry_counts[newspaper][year] += 1
+        return entry_counts
+    def get_entry_counts_by_year(self):
+        entry_counts = {}
+        for newspaper, entries in self.get_all_metadata().items():
+            for entry in entries:
+                year = entry['Date'].split('-')[0]
+                if year not in entry_counts:
+                    entry_counts[year] = 1
+                else:
+                    entry_counts[year] += 1
+        return entry_counts
+    def export_to_json(self, filename):
+        """
+        Export metadata to a JSON file
+        """
+        with open(filename, 'w') as f:
+            json.dump(self.get_all_metadata(), f, indent=4)
+
 
 class Manifest:
     """
@@ -65,6 +102,7 @@ class Manifest:
         metadata = {newspaper: [] for newspaper in self.newspapers}
         subdirs = self.list_subdirs()
         for i, subdir in enumerate(subdirs):
+            # print(subdir)
             # if i < 20:  # Limiting to the first 20 directories for now
             minibatch = Minibatch(self.name, subdir)
             metadata = minibatch.append_metadata(metadata)
@@ -92,9 +130,12 @@ class Minibatch:
         """
         Load minibatch data from the ocr_text.json file
         """
-        path = os.path.join(FILE_PATH, self.manifest_name, self.name, "ocr_text.json")
-        with open(path, "r") as f:
-            data = json.load(f)
+        try:
+            path = os.path.join(FILE_PATH, self.manifest_name, self.name, "ocr_text.json")
+            with open(path, "r") as f:
+                data = json.load(f)
+        except FileNotFoundError:
+            data = {}
         return data
     def append_metadata(self, metadata):
         """
@@ -104,6 +145,7 @@ class Minibatch:
             item_metadata = self.extract_metadata_from_filename(key)
             newspaper = item_metadata.get('Newspaper')
             if newspaper in metadata:
+                # print(newspaper)
                 metadata[newspaper].append(item_metadata)
         return metadata
     @staticmethod
@@ -125,9 +167,8 @@ class Minibatch:
         }
         return dict
 
-
-# Usage:
 if __name__ == "__main__":
     collection = ManifestCollection.from_directory(FILE_PATH, "newspapers.txt")
-    all_metadata = collection.get_all_metadata()
-    print(all_metadata)
+    print(collection.get_entry_counts_by_newspaper_and_year())
+    print(collection.get_entry_counts_by_year())
+    collection.export_to_json("metadata.json")
